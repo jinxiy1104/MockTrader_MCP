@@ -62,11 +62,13 @@ export interface Violation {
   createdAt: string;
 }
 
+export type MarketDataSource = 'MOCK' | 'HISTORICAL_CSV' | 'ALPACA' | 'POLYGON';
+
 export interface MarketPrice {
   symbol: string;
   price: number;
   ts: string;
-  source: 'MOCK';
+  source: MarketDataSource;
 }
 
 export interface MarketBar {
@@ -86,6 +88,9 @@ export interface ReplaySession {
   lookbackBars: number;
   tradingSteps: number;
   strictMarketData: boolean;
+  dataSource: MarketDataSource;
+  start?: string;
+  end?: string;
   currentIndex: number;
   startedAtIndex: number;
   barsBySymbol: Record<string, MarketBar[]>;

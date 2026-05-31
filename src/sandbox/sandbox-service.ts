@@ -12,8 +12,12 @@ import {
   TradeSide,
   Violation,
   BarInterval,
+  MarketDataSource,
 } from '../domain/types.js';
+import { AlpacaMarketDataProvider, PolygonMarketDataProvider } from '../market/external-market-provider.js';
+import { HistoricalCsvProvider } from '../market/historical-csv-provider.js';
 import { MockMarketProvider } from '../market/mock-market-provider.js';
+import { ReplayDataProvider } from '../market/replay-data-provider.js';
 import { ruleValidatorRegistry } from '../rules/rule-validator-registry.js';
 import { DEFAULT_INITIAL_BALANCE, DEFAULT_RULES, TRADING_LIMITS } from '../shared/constants.js';
 import { conflict, evaluationClosed, insufficientFunds, invalidInput, notFound } from '../shared/errors.js';
@@ -33,6 +37,13 @@ interface CreateReplayEvaluationInput extends CreateEvaluationInput {
   lookbackBars?: number;
   tradingSteps?: number;
   strictMarketData?: boolean;
+  dataSource?: ReplayInputDataSource;
+  datasetDir?: string;
+  start?: string;
+  end?: string;
+  alpacaApiKeyId?: string;
+  alpacaSecretKey?: string;
+  polygonApiKey?: string;
 }
 
 interface PlaceOrderInput {
@@ -46,7 +57,10 @@ interface PlaceOrderInput {
 interface AdvanceTimeInput {
   evaluationId: string;
   steps?: number;
+  duration?: string;
 }
+
+type ReplayInputDataSource = 'mock' | 'historical_csv' | 'alpaca' | 'polygon';
 
 export class SandboxService {
   constructor(
@@ -56,6 +70,10 @@ export class SandboxService {
 
   listSymbols(): string[] {
     return this.market.listSymbols();
+  }
+
+  listHistoricalDatasets(datasetDir?: string) {
+    return new HistoricalCsvProvider().listDatasets(datasetDir);
   }
 
   getPrice(symbol: string): MarketPrice {
@@ -101,12 +119,13 @@ export class SandboxService {
     return evaluation;
   }
 
-  createReplayEvaluation(input: CreateReplayEvaluationInput = {}) {
+  async createReplayEvaluation(input: CreateReplayEvaluationInput = {}) {
     const symbols = this.normalizeReplaySymbols(input.symbols);
     const interval = input.interval ?? '1d';
     const lookbackBars = input.lookbackBars ?? 5;
     const tradingSteps = input.tradingSteps ?? 5;
     const strictMarketData = input.strictMarketData ?? true;
+    const dataSource = input.dataSource ?? 'mock';
 
     if (!Number.isInteger(lookbackBars) || lookbackBars < 1) {
       throw invalidInput('lookbackBars must be a positive integer.');
@@ -122,9 +141,18 @@ export class SandboxService {
       rules: input.rules,
     });
 
-    const barsBySymbol = Object.fromEntries(
-      symbols.map((symbol) => [symbol, this.market.getBars(symbol, interval, totalBars)]),
-    );
+    const replayBars = await this.loadReplayBars({
+      dataSource,
+      symbols,
+      interval,
+      totalBars,
+      datasetDir: input.datasetDir,
+      start: input.start,
+      end: input.end,
+      alpacaApiKeyId: input.alpacaApiKeyId,
+      alpacaSecretKey: input.alpacaSecretKey,
+      polygonApiKey: input.polygonApiKey,
+    });
 
     const replay: ReplaySession = {
       evaluationId: evaluation.id,
@@ -133,9 +161,12 @@ export class SandboxService {
       lookbackBars,
       tradingSteps,
       strictMarketData,
+      dataSource: replayBars.source,
+      start: input.start,
+      end: input.end,
       currentIndex: lookbackBars - 1,
       startedAtIndex: lookbackBars - 1,
-      barsBySymbol,
+      barsBySymbol: replayBars.barsBySymbol,
       createdAt: new Date().toISOString(),
     };
 
@@ -278,7 +309,7 @@ export class SandboxService {
 
   advanceTime(input: AdvanceTimeInput) {
     const replay = this.getReplayOrThrow(input.evaluationId);
-    const requestedSteps = input.steps ?? 1;
+    const requestedSteps = this.resolveAdvanceSteps(replay, input);
     if (!Number.isInteger(requestedSteps) || requestedSteps < 1) {
       throw invalidInput('steps must be a positive integer.');
     }
@@ -310,6 +341,9 @@ export class SandboxService {
         symbols: replay.symbols,
         interval: replay.interval,
         strictMarketData: replay.strictMarketData,
+        dataSource: replay.dataSource,
+        start: replay.start,
+        end: replay.end,
         currentTime: currentBar.startTs,
         currentIndex: replay.currentIndex,
         currentStep: elapsedSteps,
@@ -528,6 +562,76 @@ export class SandboxService {
     if (quantity > TRADING_LIMITS.maxOrderQuantity) {
       throw invalidInput(`Quantity too large: maximum is ${TRADING_LIMITS.maxOrderQuantity}.`);
     }
+  }
+
+  private async loadReplayBars(input: {
+    dataSource: ReplayInputDataSource;
+    symbols: string[];
+    interval: BarInterval;
+    totalBars: number;
+    datasetDir?: string;
+    start?: string;
+    end?: string;
+    alpacaApiKeyId?: string;
+    alpacaSecretKey?: string;
+    polygonApiKey?: string;
+  }) {
+    if (input.dataSource === 'mock') {
+      return {
+        source: 'MOCK' as MarketDataSource,
+        barsBySymbol: Object.fromEntries(
+          input.symbols.map((symbol) => [symbol, this.market.getBars(symbol, input.interval, input.totalBars)]),
+        ),
+      };
+    }
+
+    const provider = this.getReplayDataProvider(input.dataSource);
+    return provider.loadBars(input);
+  }
+
+  private getReplayDataProvider(dataSource: Exclude<ReplayInputDataSource, 'mock'>): ReplayDataProvider {
+    switch (dataSource) {
+      case 'historical_csv':
+        return new HistoricalCsvProvider();
+      case 'alpaca':
+        return new AlpacaMarketDataProvider();
+      case 'polygon':
+        return new PolygonMarketDataProvider();
+    }
+  }
+
+  private resolveAdvanceSteps(replay: ReplaySession, input: AdvanceTimeInput): number {
+    if (input.steps !== undefined && input.duration !== undefined) {
+      throw invalidInput('Use either steps or duration, not both.');
+    }
+
+    if (input.duration === undefined) {
+      const requestedSteps = input.steps ?? 1;
+      if (!Number.isInteger(requestedSteps) || requestedSteps < 1) {
+        throw invalidInput('steps must be a positive integer.');
+      }
+      return requestedSteps;
+    }
+
+    return this.durationToSteps(replay.interval, input.duration);
+  }
+
+  private durationToSteps(interval: BarInterval, duration: string): number {
+    const match = /^(\d+)(m|h|d)$/i.exec(duration.trim());
+    if (!match) {
+      throw invalidInput('duration must use a format like 5m, 1h, or 1d.');
+    }
+
+    const amount = Number(match[1]);
+    const unit = match[2]!.toLowerCase();
+    const minutes = unit === 'm' ? amount : unit === 'h' ? amount * 60 : amount * 390;
+    const intervalMinutes = interval === '1m' ? 1 : 390;
+    const steps = Math.ceil(minutes / intervalMinutes);
+
+    if (steps < 1) {
+      throw invalidInput('duration must advance at least one replay step.');
+    }
+    return steps;
   }
 
   private getExecutionPrice(evaluationId: string, symbol: string): number {

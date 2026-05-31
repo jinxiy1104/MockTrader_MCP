@@ -2,8 +2,10 @@
 dist/
 HANDOFF_PROMPT.md
 docs/
+data/historical/*.csv
 .env
 .env.*
+!.env.example
 coverage/
 .DS_Store
 npm-debug.log*

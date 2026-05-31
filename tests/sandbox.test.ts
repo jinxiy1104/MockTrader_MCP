@@ -136,9 +136,9 @@ describe('SandboxService', () => {
     expect(sandbox.getViolations(evaluation.id)).toEqual([]);
   });
 
-  it('hides future bars in replay evaluations until time advances', () => {
+  it('hides future bars in replay evaluations until time advances', async () => {
     const sandbox = new SandboxService();
-    const replay = sandbox.createReplayEvaluation({
+    const replay = await sandbox.createReplayEvaluation({
       symbols: ['AAPL'],
       lookbackBars: 3,
       tradingSteps: 5,
@@ -156,9 +156,9 @@ describe('SandboxService', () => {
     expect(nextBars.bars.AAPL?.at(-1)?.startTs).not.toBe(initialBars.bars.AAPL?.at(-1)?.startTs);
   });
 
-  it('blocks normal market data tools during strict replay', () => {
+  it('blocks normal market data tools during strict replay', async () => {
     const sandbox = new SandboxService();
-    const replay = sandbox.createReplayEvaluation({
+    const replay = await sandbox.createReplayEvaluation({
       symbols: ['AAPL'],
       lookbackBars: 3,
       tradingSteps: 2,
@@ -174,9 +174,9 @@ describe('SandboxService', () => {
     expect(sandbox.getPrice('AAPL').symbol).toBe('AAPL');
   });
 
-  it('allows normal market data tools when replay strict mode is disabled', () => {
+  it('allows normal market data tools when replay strict mode is disabled', async () => {
     const sandbox = new SandboxService();
-    sandbox.createReplayEvaluation({
+    await sandbox.createReplayEvaluation({
       symbols: ['AAPL'],
       lookbackBars: 3,
       tradingSteps: 2,
@@ -187,9 +187,9 @@ describe('SandboxService', () => {
     expect(sandbox.getBars('AAPL', '1d', 3)).toHaveLength(3);
   });
 
-  it('runs a one-week replay and reports PnL', () => {
+  it('runs a one-week replay and reports PnL', async () => {
     const sandbox = new SandboxService();
-    const replay = sandbox.createReplayEvaluation({
+    const replay = await sandbox.createReplayEvaluation({
       symbols: ['AAPL'],
       lookbackBars: 5,
       tradingSteps: 5,
@@ -214,5 +214,37 @@ describe('SandboxService', () => {
     expect(report.tradeCount).toBe(1);
     expect(report.replay?.totalSteps).toBe(5);
     expect(report.totalPnL).toBeCloseTo(report.equity - report.initialBalance, 6);
+  });
+
+  it('runs replay from local historical CSV bars', async () => {
+    const sandbox = new SandboxService();
+    const datasets = sandbox.listHistoricalDatasets('tests/fixtures/historical');
+    expect(datasets.map((dataset) => dataset.file)).toContain('AAPL_1d.csv');
+
+    const replay = await sandbox.createReplayEvaluation({
+      dataSource: 'historical_csv',
+      datasetDir: 'tests/fixtures/historical',
+      symbols: ['AAPL'],
+      interval: '1d',
+      lookbackBars: 3,
+      tradingSteps: 2,
+      start: '2024-01-02T21:00:00.000Z',
+      rules: {
+        maxSinglePositionNotional: 1_000_000,
+        maxDrawdown: 1_000_000,
+      },
+    });
+
+    const visible = sandbox.getVisibleBars(replay.evaluation.id, 'AAPL');
+    expect(visible.bars.AAPL?.map((bar) => bar.close)).toEqual([100, 102, 103]);
+    expect(replay.replay.dataSource).toBe('HISTORICAL_CSV');
+
+    sandbox.placeOrder({ evaluationId: replay.evaluation.id, symbol: 'AAPL', side: 'BUY', quantity: 10 });
+    sandbox.advanceTime({ evaluationId: replay.evaluation.id, duration: '2d' });
+    const report = sandbox.getPnlReport(replay.evaluation.id);
+
+    expect(report.replay?.finished).toBe(true);
+    expect(report.positions[0]?.currentPrice).toBe(106);
+    expect(report.totalPnL).toBeGreaterThan(0);
   });
 });

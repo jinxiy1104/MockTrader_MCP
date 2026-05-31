@@ -47,6 +47,19 @@ export function createMockTradeMcpServer(sandbox = new SandboxService()): McpSer
   );
 
   server.tool(
+    'list_historical_datasets',
+    'List local historical CSV datasets available for replay backtests.',
+    {
+      datasetDir: z
+        .string()
+        .min(1)
+        .optional()
+        .describe('Directory containing historical CSV files. Defaults to data/historical.'),
+    },
+    async ({ datasetDir }) => jsonResponse(sandbox.listHistoricalDatasets(datasetDir)),
+  );
+
+  server.tool(
     'create_evaluation',
     'Create a fresh in-memory trading evaluation account.',
     {
@@ -98,8 +111,22 @@ export function createMockTradeMcpServer(sandbox = new SandboxService()): McpSer
         .boolean()
         .default(true)
         .describe('When true, blocks normal get_price/get_bars while this replay has hidden future bars.'),
+      dataSource: z
+        .enum(['mock', 'historical_csv', 'alpaca', 'polygon'])
+        .default('mock')
+        .describe('Replay data source. Use historical_csv for local real bars, or alpaca/polygon for optional APIs.'),
+      datasetDir: z
+        .string()
+        .min(1)
+        .optional()
+        .describe('Directory containing historical CSV files for historical_csv replay.'),
+      start: z.string().datetime().optional().describe('Inclusive replay start timestamp for historical/API data.'),
+      end: z.string().datetime().optional().describe('Inclusive replay end timestamp for historical/API data.'),
+      alpacaApiKeyId: z.string().min(1).optional().describe('Optional Alpaca API key ID for alpaca dataSource.'),
+      alpacaSecretKey: z.string().min(1).optional().describe('Optional Alpaca API secret key for alpaca dataSource.'),
+      polygonApiKey: z.string().min(1).optional().describe('Optional Polygon API key for polygon dataSource.'),
     },
-    async (input) => jsonResponse(sandbox.createReplayEvaluation(input)),
+    async (input) => jsonResponse(await sandbox.createReplayEvaluation(input)),
   );
 
   server.tool(
@@ -149,9 +176,14 @@ export function createMockTradeMcpServer(sandbox = new SandboxService()): McpSer
     'Advance a replay evaluation by one or more bars, revealing the next hidden market data step.',
     {
       evaluationId: z.string().min(1).describe('Replay evaluation ID returned by create_replay_evaluation.'),
-      steps: z.number().int().min(1).max(1000).default(1).describe('Number of replay steps to advance.'),
+      steps: z.number().int().min(1).max(1000).optional().describe('Number of replay steps to advance.'),
+      duration: z
+        .string()
+        .regex(/^\d+(m|h|d)$/i)
+        .optional()
+        .describe('Optional duration such as 5m, 1h, or 1d. Mutually exclusive with steps.'),
     },
-    async ({ evaluationId, steps }) => jsonResponse(sandbox.advanceTime({ evaluationId, steps })),
+    async ({ evaluationId, steps, duration }) => jsonResponse(sandbox.advanceTime({ evaluationId, steps, duration })),
   );
 
   server.tool(
