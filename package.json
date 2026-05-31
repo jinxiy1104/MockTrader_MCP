@@ -1,7 +1,7 @@
 {
   "name": "mocktrade-mcp",
   "version": "0.1.0",
-  "description": "Local MCP server for evaluating AI trading agents in a deterministic simulated sandbox.",
+  "description": "Local MCP server for evaluating AI trading agents with simulated orders, risk rules, and historical replay backtests.",
   "type": "module",
   "bin": {
     "mocktrade-mcp": "./dist/index.js"
@@ -9,22 +9,34 @@
   "files": [
     "dist",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    ".env.example",
+    "examples"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "ci": "npm run build && npm test",
     "dev": "tsx src/index.ts",
     "start": "node dist/index.js",
-    "test": "vitest run"
+    "test": "vitest run",
+    "prepack": "npm run build",
+    "pack:dry-run": "npm pack --dry-run"
   },
   "keywords": [
     "mcp",
     "trading",
     "evaluation",
     "sandbox",
-    "ai-agent"
+    "ai-agent",
+    "backtest",
+    "alpaca",
+    "polygon"
   ],
   "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.13.0",
     "zod": "^3.25.0"

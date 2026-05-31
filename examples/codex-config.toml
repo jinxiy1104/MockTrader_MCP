@@ -1,0 +1,4 @@
+[mcp_servers.mocktrade]
+command = 'node'
+args = ['C:\Projects\MockTrade_MCP\dist\index.js']
+startup_timeout_sec = 30

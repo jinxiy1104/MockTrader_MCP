@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "mocktrade": {
+      "command": "node",
+      "args": ["C:\\Projects\\MockTrade_MCP\\dist\\index.js"]
+    }
+  }
+}
