@@ -1,5 +1,7 @@
 ﻿node_modules/
 dist/
+HANDOFF_PROMPT.md
+docs/
 .env
 .env.*
 coverage/
