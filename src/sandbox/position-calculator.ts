@@ -1,19 +1,18 @@
 import { Position, Trade } from '../domain/types.js';
-import { MockMarketProvider } from '../market/mock-market-provider.js';
 
 interface RebuildOptions {
   evaluationId: string;
   trades: Trade[];
-  market: MockMarketProvider;
+  getCurrentPrice: (symbol: string) => number;
 }
 
-export function rebuildPositions({ evaluationId, trades, market }: RebuildOptions): Position[] {
+export function rebuildPositions({ evaluationId, trades, getCurrentPrice }: RebuildOptions): Position[] {
   const positions = new Map<string, Position>();
 
   for (const trade of trades) {
     let position = positions.get(trade.symbol);
     if (!position) {
-      const currentPrice = market.peekLastPrice(trade.symbol);
+      const currentPrice = getCurrentPrice(trade.symbol);
       position = {
         evaluationId,
         symbol: trade.symbol,
@@ -45,7 +44,7 @@ export function rebuildPositions({ evaluationId, trades, market }: RebuildOption
   return [...positions.values()]
     .filter((position) => position.quantity > 0)
     .map((position) => {
-      const currentPrice = market.peekLastPrice(position.symbol);
+      const currentPrice = getCurrentPrice(position.symbol);
       return {
         ...position,
         currentPrice,

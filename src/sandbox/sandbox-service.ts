@@ -5,6 +5,7 @@ import {
   MarketBar,
   MarketPrice,
   Position,
+  ReplaySession,
   RuleViolation,
   Ruleset,
   Trade,
@@ -26,12 +27,25 @@ interface CreateEvaluationInput {
   rules?: RulesInput;
 }
 
+interface CreateReplayEvaluationInput extends CreateEvaluationInput {
+  symbols?: string[];
+  interval?: BarInterval;
+  lookbackBars?: number;
+  tradingSteps?: number;
+  strictMarketData?: boolean;
+}
+
 interface PlaceOrderInput {
   evaluationId: string;
   symbol: string;
   side: TradeSide;
   quantity: number;
   clientOrderId?: string;
+}
+
+interface AdvanceTimeInput {
+  evaluationId: string;
+  steps?: number;
 }
 
 export class SandboxService {
@@ -45,10 +59,12 @@ export class SandboxService {
   }
 
   getPrice(symbol: string): MarketPrice {
+    this.assertNoStrictReplayMarketData('get_price');
     return this.market.getLastPrice(symbol);
   }
 
   getBars(symbol: string, interval: BarInterval, limit: number): MarketBar[] {
+    this.assertNoStrictReplayMarketData('get_bars');
     return this.market.getBars(symbol, interval, limit);
   }
 
@@ -85,6 +101,54 @@ export class SandboxService {
     return evaluation;
   }
 
+  createReplayEvaluation(input: CreateReplayEvaluationInput = {}) {
+    const symbols = this.normalizeReplaySymbols(input.symbols);
+    const interval = input.interval ?? '1d';
+    const lookbackBars = input.lookbackBars ?? 5;
+    const tradingSteps = input.tradingSteps ?? 5;
+    const strictMarketData = input.strictMarketData ?? true;
+
+    if (!Number.isInteger(lookbackBars) || lookbackBars < 1) {
+      throw invalidInput('lookbackBars must be a positive integer.');
+    }
+    if (!Number.isInteger(tradingSteps) || tradingSteps < 1) {
+      throw invalidInput('tradingSteps must be a positive integer.');
+    }
+
+    const totalBars = lookbackBars + tradingSteps;
+    const evaluation = this.createEvaluation({
+      challengeName: input.challengeName ?? 'MockTrade Replay Evaluation',
+      initialBalance: input.initialBalance,
+      rules: input.rules,
+    });
+
+    const barsBySymbol = Object.fromEntries(
+      symbols.map((symbol) => [symbol, this.market.getBars(symbol, interval, totalBars)]),
+    );
+
+    const replay: ReplaySession = {
+      evaluationId: evaluation.id,
+      symbols,
+      interval,
+      lookbackBars,
+      tradingSteps,
+      strictMarketData,
+      currentIndex: lookbackBars - 1,
+      startedAtIndex: lookbackBars - 1,
+      barsBySymbol,
+      createdAt: new Date().toISOString(),
+    };
+
+    this.store.replaySessions.set(evaluation.id, replay);
+    this.refreshEvaluationAccount(evaluation.id);
+
+    return {
+      evaluation: this.getEvaluationOrThrow(evaluation.id),
+      replay: this.getReplayStatus(evaluation.id).replay,
+      visibleBars: this.getVisibleBars(evaluation.id),
+    };
+  }
+
   placeOrder(input: PlaceOrderInput) {
     const evaluation = this.getEvaluationOrThrow(input.evaluationId);
     if (evaluation.status !== 'ACTIVE') {
@@ -116,7 +180,7 @@ export class SandboxService {
       );
     }
 
-    const marketPrice = this.market.getLastPrice(symbol).price;
+    const marketPrice = this.getExecutionPrice(evaluation.id, symbol);
     if (side === 'BUY') {
       this.assertBuyWithinSinglePositionLimit(evaluation, symbol, input.quantity, marketPrice, existingPosition);
     }
@@ -141,7 +205,7 @@ export class SandboxService {
       price: executedPrice,
       fee,
       clientOrderId: input.clientOrderId,
-      executedAt: new Date().toISOString(),
+      executedAt: this.getExecutionTimestamp(evaluation.id),
     };
 
     const trades = [...this.store.getTrades(evaluation.id), trade];
@@ -187,8 +251,102 @@ export class SandboxService {
     return rebuildPositions({
       evaluationId,
       trades: this.store.getTrades(evaluationId),
-      market: this.market,
+      getCurrentPrice: (symbol) => this.getCurrentPriceForEvaluation(evaluationId, symbol),
     });
+  }
+
+  getVisibleBars(evaluationId: string, symbol?: string, limit?: number) {
+    const replay = this.getReplayOrThrow(evaluationId);
+    const symbols = symbol ? [this.normalizeReplaySymbolForSession(replay, symbol)] : replay.symbols;
+    const boundedLimit = limit === undefined ? undefined : Math.max(1, Math.min(limit, 1000));
+    const bars = Object.fromEntries(
+      symbols.map((entry) => {
+        const visible = replay.barsBySymbol[entry]!.slice(0, replay.currentIndex + 1);
+        return [entry, boundedLimit === undefined ? visible : visible.slice(-boundedLimit)];
+      }),
+    );
+
+    return {
+      evaluationId,
+      currentTime: this.getReplayCurrentBar(replay, replay.symbols[0]!).startTs,
+      visibleThroughIndex: replay.currentIndex,
+      visibleThrough: this.getReplayCurrentBar(replay, replay.symbols[0]!).startTs,
+      hiddenFutureBars: this.getHiddenBarsRemaining(replay),
+      bars,
+    };
+  }
+
+  advanceTime(input: AdvanceTimeInput) {
+    const replay = this.getReplayOrThrow(input.evaluationId);
+    const requestedSteps = input.steps ?? 1;
+    if (!Number.isInteger(requestedSteps) || requestedSteps < 1) {
+      throw invalidInput('steps must be a positive integer.');
+    }
+
+    const maxIndex = this.getReplayMaxIndex(replay);
+    const nextIndex = Math.min(maxIndex, replay.currentIndex + requestedSteps);
+    replay.currentIndex = nextIndex;
+    this.store.replaySessions.set(replay.evaluationId, replay);
+
+    this.refreshEvaluationAccount(replay.evaluationId);
+    const current = this.getEvaluationOrThrow(replay.evaluationId);
+    if (current.status === 'ACTIVE') {
+      this.evaluateAccount(replay.evaluationId);
+    }
+
+    return this.getReplayStatus(replay.evaluationId);
+  }
+
+  getReplayStatus(evaluationId: string) {
+    const replay = this.getReplayOrThrow(evaluationId);
+    const maxIndex = this.getReplayMaxIndex(replay);
+    const elapsedSteps = replay.currentIndex - replay.startedAtIndex;
+    const currentBar = this.getReplayCurrentBar(replay, replay.symbols[0]!);
+
+    return {
+      evaluation: this.getEvaluationStatus(evaluationId).evaluation,
+      replay: {
+        evaluationId,
+        symbols: replay.symbols,
+        interval: replay.interval,
+        strictMarketData: replay.strictMarketData,
+        currentTime: currentBar.startTs,
+        currentIndex: replay.currentIndex,
+        currentStep: elapsedSteps,
+        totalSteps: replay.tradingSteps,
+        finished: replay.currentIndex >= maxIndex,
+        visibleThrough: currentBar.startTs,
+        hiddenFutureBars: this.getHiddenBarsRemaining(replay),
+      },
+    };
+  }
+
+  getPnlReport(evaluationId: string) {
+    const status = this.getEvaluationStatus(evaluationId);
+    const positions = status.positions;
+    const trades = this.getTradeHistory(evaluationId, 1000);
+    const unrealizedPnl = roundMoney(positions.reduce((sum, position) => sum + position.unrealizedPnl, 0));
+    const realizedPnl = roundMoney(status.metrics.totalPnL - unrealizedPnl);
+    const replay = this.store.replaySessions.has(evaluationId) ? this.getReplayStatus(evaluationId).replay : undefined;
+
+    return {
+      evaluationId,
+      status: status.evaluation.status,
+      statusReason: status.evaluation.statusReason,
+      initialBalance: status.evaluation.initialBalance,
+      cashBalance: status.evaluation.currentBalance,
+      equity: status.evaluation.equity,
+      totalPnL: status.metrics.totalPnL,
+      realizedPnl,
+      unrealizedPnl,
+      returnPct: roundMoney((status.metrics.totalPnL / status.evaluation.initialBalance) * 100),
+      metrics: status.metrics,
+      positions,
+      tradeCount: trades.length,
+      trades,
+      violations: status.violations,
+      replay,
+    };
   }
 
   getTradeHistory(evaluationId: string, limit = 100): Trade[] {
@@ -282,7 +440,7 @@ export class SandboxService {
     const trades = this.store.getTrades(evaluationId).filter((trade) => trade.executedAt.slice(0, 10) === today);
 
     const dailyPnL = trades.reduce((sum, trade) => {
-      const currentPrice = this.market.peekLastPrice(trade.symbol);
+      const currentPrice = this.getCurrentPriceForEvaluation(evaluationId, trade.symbol);
       if (trade.side === 'BUY') {
         return sum + trade.quantity * (currentPrice - trade.price) - trade.fee;
       }
@@ -298,7 +456,7 @@ export class SandboxService {
     const positions = rebuildPositions({
       evaluationId,
       trades: this.store.getTrades(evaluationId),
-      market: this.market,
+      getCurrentPrice: (symbol) => this.getCurrentPriceForEvaluation(evaluationId, symbol),
     });
     const openMarketValue = positions.reduce((sum, position) => sum + position.marketValue, 0);
     const equity = roundMoney(currentBalance + openMarketValue);
@@ -370,6 +528,85 @@ export class SandboxService {
     if (quantity > TRADING_LIMITS.maxOrderQuantity) {
       throw invalidInput(`Quantity too large: maximum is ${TRADING_LIMITS.maxOrderQuantity}.`);
     }
+  }
+
+  private getExecutionPrice(evaluationId: string, symbol: string): number {
+    const replay = this.store.replaySessions.get(evaluationId);
+    if (!replay) {
+      return this.market.getLastPrice(symbol).price;
+    }
+    return this.getReplayCurrentBar(replay, symbol).close;
+  }
+
+  private assertNoStrictReplayMarketData(toolName: string): void {
+    const strictReplay = [...this.store.replaySessions.values()].find(
+      (replay) => replay.strictMarketData && replay.currentIndex < this.getReplayMaxIndex(replay),
+    );
+
+    if (!strictReplay) {
+      return;
+    }
+
+    throw conflict(
+      `${toolName} is blocked while strict replay evaluation ${strictReplay.evaluationId} has hidden future bars. Use get_visible_bars for replay market data, then advance_time when ready.`,
+    );
+  }
+
+  private getExecutionTimestamp(evaluationId: string): string {
+    const replay = this.store.replaySessions.get(evaluationId);
+    if (!replay) {
+      return new Date().toISOString();
+    }
+    return this.getReplayCurrentBar(replay, replay.symbols[0]!).startTs;
+  }
+
+  private getCurrentPriceForEvaluation(evaluationId: string, symbol: string): number {
+    const replay = this.store.replaySessions.get(evaluationId);
+    if (!replay) {
+      return this.market.peekLastPrice(symbol);
+    }
+    return this.getReplayCurrentBar(replay, symbol).close;
+  }
+
+  private normalizeReplaySymbols(symbols?: string[]): string[] {
+    const normalized = (symbols && symbols.length > 0 ? symbols : this.market.listSymbols()).map((symbol) =>
+      this.market.normalizeSymbol(symbol),
+    );
+    return [...new Set(normalized)];
+  }
+
+  private normalizeReplaySymbolForSession(replay: ReplaySession, symbol: string): string {
+    const normalized = this.market.normalizeSymbol(symbol);
+    if (!replay.symbols.includes(normalized)) {
+      throw invalidInput(`Symbol ${normalized} is not part of replay evaluation ${replay.evaluationId}.`);
+    }
+    return normalized;
+  }
+
+  private getReplayOrThrow(evaluationId: string): ReplaySession {
+    this.getEvaluationOrThrow(evaluationId);
+    const replay = this.store.replaySessions.get(evaluationId);
+    if (!replay) {
+      throw notFound(`Replay session not found for evaluation: ${evaluationId}`);
+    }
+    return replay;
+  }
+
+  private getReplayCurrentBar(replay: ReplaySession, symbol: string): MarketBar {
+    const normalized = this.normalizeReplaySymbolForSession(replay, symbol);
+    const bar = replay.barsBySymbol[normalized]?.[replay.currentIndex];
+    if (!bar) {
+      throw notFound(`Replay bar not found for ${normalized} at index ${replay.currentIndex}.`);
+    }
+    return bar;
+  }
+
+  private getReplayMaxIndex(replay: ReplaySession): number {
+    return Math.min(...replay.symbols.map((symbol) => replay.barsBySymbol[symbol]!.length - 1));
+  }
+
+  private getHiddenBarsRemaining(replay: ReplaySession): number {
+    return Math.max(0, this.getReplayMaxIndex(replay) - replay.currentIndex);
   }
 
   private countTradingDays(evaluationId: string): number {

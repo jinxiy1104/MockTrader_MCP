@@ -79,6 +79,19 @@ export interface MarketBar {
   volume: number;
 }
 
+export interface ReplaySession {
+  evaluationId: string;
+  symbols: string[];
+  interval: BarInterval;
+  lookbackBars: number;
+  tradingSteps: number;
+  strictMarketData: boolean;
+  currentIndex: number;
+  startedAtIndex: number;
+  barsBySymbol: Record<string, MarketBar[]>;
+  createdAt: string;
+}
+
 export interface EvaluationMetrics {
   currentEquity: number;
   peakEquity: number;

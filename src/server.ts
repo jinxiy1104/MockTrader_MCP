@@ -63,6 +63,46 @@ export function createMockTradeMcpServer(sandbox = new SandboxService()): McpSer
   );
 
   server.tool(
+    'create_replay_evaluation',
+    'Create a time-stepped replay evaluation where future market bars are hidden until advance_time is called.',
+    {
+      challengeName: z.string().min(1).max(100).optional().describe('Optional replay evaluation name.'),
+      initialBalance: z
+        .number()
+        .positive()
+        .default(DEFAULT_INITIAL_BALANCE)
+        .describe('Starting cash balance.'),
+      rules: RulesInputSchema.optional().describe('Optional rule overrides.'),
+      symbols: z
+        .array(z.string().min(1))
+        .min(1)
+        .max(20)
+        .optional()
+        .describe('Symbols included in the replay. Defaults to all mock symbols.'),
+      interval: z.enum(SUPPORTED_INTERVALS).default('1d').describe('Replay bar interval.'),
+      lookbackBars: z
+        .number()
+        .int()
+        .min(1)
+        .max(1000)
+        .default(5)
+        .describe('Historical bars visible before the first trading step.'),
+      tradingSteps: z
+        .number()
+        .int()
+        .min(1)
+        .max(1000)
+        .default(5)
+        .describe('Number of hidden future bars to reveal one step at a time.'),
+      strictMarketData: z
+        .boolean()
+        .default(true)
+        .describe('When true, blocks normal get_price/get_bars while this replay has hidden future bars.'),
+    },
+    async (input) => jsonResponse(sandbox.createReplayEvaluation(input)),
+  );
+
+  server.tool(
     'place_order',
     'Place a simulated market order in an active evaluation.',
     {
@@ -91,6 +131,45 @@ export function createMockTradeMcpServer(sandbox = new SandboxService()): McpSer
       evaluationId: z.string().min(1).describe('Evaluation ID returned by create_evaluation.'),
     },
     async ({ evaluationId }) => jsonResponse(sandbox.getPositions(evaluationId)),
+  );
+
+  server.tool(
+    'get_visible_bars',
+    'Get only the replay bars visible at the current replay time. Future bars remain hidden.',
+    {
+      evaluationId: z.string().min(1).describe('Replay evaluation ID returned by create_replay_evaluation.'),
+      symbol: z.string().min(1).optional().describe('Optional symbol filter.'),
+      limit: z.number().int().min(1).max(1000).optional().describe('Optional max visible bars per symbol.'),
+    },
+    async ({ evaluationId, symbol, limit }) => jsonResponse(sandbox.getVisibleBars(evaluationId, symbol, limit)),
+  );
+
+  server.tool(
+    'advance_time',
+    'Advance a replay evaluation by one or more bars, revealing the next hidden market data step.',
+    {
+      evaluationId: z.string().min(1).describe('Replay evaluation ID returned by create_replay_evaluation.'),
+      steps: z.number().int().min(1).max(1000).default(1).describe('Number of replay steps to advance.'),
+    },
+    async ({ evaluationId, steps }) => jsonResponse(sandbox.advanceTime({ evaluationId, steps })),
+  );
+
+  server.tool(
+    'get_replay_status',
+    'Get replay clock state, hidden-bars count, and linked evaluation status.',
+    {
+      evaluationId: z.string().min(1).describe('Replay evaluation ID returned by create_replay_evaluation.'),
+    },
+    async ({ evaluationId }) => jsonResponse(sandbox.getReplayStatus(evaluationId)),
+  );
+
+  server.tool(
+    'get_pnl_report',
+    'Get a structured PnL report with equity, realized/unrealized PnL, trades, positions, and violations.',
+    {
+      evaluationId: z.string().min(1).describe('Evaluation ID returned by create_evaluation or create_replay_evaluation.'),
+    },
+    async ({ evaluationId }) => jsonResponse(sandbox.getPnlReport(evaluationId)),
   );
 
   server.tool(

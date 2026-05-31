@@ -1,13 +1,15 @@
-import { Evaluation, Trade, Violation } from '../domain/types.js';
+import { Evaluation, ReplaySession, Trade, Violation } from '../domain/types.js';
 
 export class InMemoryStore {
   readonly evaluations = new Map<string, Evaluation>();
+  readonly replaySessions = new Map<string, ReplaySession>();
   readonly trades = new Map<string, Trade[]>();
   readonly violations = new Map<string, Violation[]>();
   readonly clientOrderIds = new Map<string, Trade>();
 
   reset(): void {
     this.evaluations.clear();
+    this.replaySessions.clear();
     this.trades.clear();
     this.violations.clear();
     this.clientOrderIds.clear();
