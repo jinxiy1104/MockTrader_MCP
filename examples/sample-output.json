@@ -1,0 +1,61 @@
+{
+  "evaluationId": "example-evaluation-id",
+  "status": "ACTIVE",
+  "initialBalance": 100000,
+  "cashBalance": 98199.5218,
+  "equity": 100001.1418,
+  "totalPnL": 1.1418,
+  "realizedPnl": -1.7982,
+  "unrealizedPnl": 2.94,
+  "returnPct": 0.001142,
+  "metrics": {
+    "currentEquity": 100001.1418,
+    "peakEquity": 100001.1418,
+    "currentDrawdown": 0,
+    "dailyPnL": 1.1418,
+    "totalPnL": 1.1418,
+    "openPositionsValue": 1801.62,
+    "leverage": 0.018016,
+    "tradingDays": 1
+  },
+  "positions": [
+    {
+      "evaluationId": "example-evaluation-id",
+      "symbol": "AAPL",
+      "quantity": 10,
+      "avgPrice": 179.868,
+      "realizedPnl": -1.7982,
+      "unrealizedPnl": 2.94,
+      "currentPrice": 180.162,
+      "marketValue": 1801.62
+    }
+  ],
+  "tradeCount": 1,
+  "trades": [
+    {
+      "id": "example-trade-id",
+      "evaluationId": "example-evaluation-id",
+      "symbol": "AAPL",
+      "side": "BUY",
+      "quantity": 10,
+      "price": 179.868,
+      "fee": 1.7982,
+      "executedAt": "2024-01-08T21:00:00.000Z"
+    }
+  ],
+  "violations": [],
+  "replay": {
+    "evaluationId": "example-evaluation-id",
+    "symbols": ["AAPL"],
+    "interval": "1d",
+    "strictMarketData": true,
+    "dataSource": "MOCK",
+    "currentTime": "2024-01-12T21:00:00.000Z",
+    "currentIndex": 9,
+    "currentStep": 5,
+    "totalSteps": 5,
+    "finished": true,
+    "visibleThrough": "2024-01-12T21:00:00.000Z",
+    "hiddenFutureBars": 0
+  }
+}

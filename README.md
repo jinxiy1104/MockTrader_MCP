@@ -14,6 +14,17 @@ It is designed for agent evaluation, not live trading. It does not place broker 
 - Replays market data from deterministic mock bars, local historical CSV files, Alpaca, or Polygon.
 - Produces structured PnL reports for agent runs.
 
+## Architecture
+
+```mermaid
+flowchart LR
+  Client["MCP Client<br/>Codex / Claude / Cursor"] --> Server["MockTrade MCP<br/>stdio server + tool schemas"]
+  Server --> Sandbox["SandboxService<br/>evaluations, orders, positions"]
+  Sandbox --> Market["Market Data<br/>mock / CSV / Alpaca / Polygon"]
+  Sandbox --> Rules["Rules<br/>risk checks + pass/fail"]
+  Sandbox --> Reports["Reports<br/>PnL, trades, violations"]
+```
+
 ## Status
 
 This project is pre-1.0. The default mode is zero-config and deterministic. External market-data providers are optional and require user-supplied credentials.
@@ -324,6 +335,8 @@ npm run pack:dry-run
 ```
 
 Production code lives under `src/`. Tests and small historical fixtures live under `tests/`. User historical datasets should go under `data/historical/` and are ignored by Git.
+
+More examples are available under `examples/`, including MCP client configs, replay prompts, and a sample PnL report.
 
 ## Package Contents
 

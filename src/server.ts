@@ -16,7 +16,7 @@ const jsonResponse = (data: unknown) => ({
 export function createMockTradeMcpServer(sandbox = new SandboxService()): McpServer {
   const server = new McpServer({
     name: 'mocktrade-mcp',
-    version: '0.1.0',
+    version: '0.1.1',
   });
 
   server.tool(
