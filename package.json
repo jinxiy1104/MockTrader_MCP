@@ -4,7 +4,7 @@
   "description": "Local MCP server for evaluating AI trading agents with simulated orders, risk rules, and historical replay backtests.",
   "type": "module",
   "bin": {
-    "mocktrade-mcp": "./dist/index.js"
+    "mocktrade-mcp": "dist/index.js"
   },
   "files": [
     "dist",

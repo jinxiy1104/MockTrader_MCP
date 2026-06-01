@@ -20,7 +20,37 @@ This project is pre-1.0. The default mode is zero-config and deterministic. Exte
 
 ## Installation
 
-From a local clone:
+Use directly from npm:
+
+```bash
+npx mocktrade-mcp
+```
+
+Most users should configure their MCP client to run the npm package directly, rather than cloning this repository.
+
+Codex / TOML-style config:
+
+```toml
+[mcp_servers.mocktrade]
+command = 'npx'
+args = ['-y', 'mocktrade-mcp']
+startup_timeout_sec = 30
+```
+
+Claude Desktop / JSON-style config:
+
+```json
+{
+  "mcpServers": {
+    "mocktrade": {
+      "command": "npx",
+      "args": ["-y", "mocktrade-mcp"]
+    }
+  }
+}
+```
+
+For local development from a clone:
 
 ```bash
 git clone <repo-url>
@@ -42,17 +72,11 @@ During development:
 npm run dev
 ```
 
-After publishing, the intended install path is:
-
-```bash
-npx mocktrade-mcp
-```
-
 ## MCP Client Configuration
 
 An MCP client is the application that connects to this server. Examples include Codex, Claude Desktop, Cursor, and other agent tools.
 
-Build first:
+If you are developing from a local clone, build first:
 
 ```bash
 npm run build
