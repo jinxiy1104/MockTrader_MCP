@@ -64,7 +64,7 @@ Claude Desktop / JSON-style config:
 For local development from a clone:
 
 ```bash
-git clone <repo-url>
+git clone https://github.com/jinxiy1104/MockTrader_MCP.git
 cd MockTrade_MCP
 npm install
 npm run build
