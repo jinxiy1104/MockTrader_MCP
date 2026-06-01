@@ -1,6 +1,6 @@
 {
   "name": "mocktrade-mcp",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Local MCP server for evaluating AI trading agents with simulated orders, risk rules, and historical replay backtests.",
   "type": "module",
   "bin": {
